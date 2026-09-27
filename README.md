@@ -50,7 +50,7 @@ contract — not just whether the code path is reachable.
 ## Installation
 
 ```bash
-pip install git+https://github.com/<your-username>/breaking-change-detective.git
+pip install git+https://github.com/AsadRegards/breaking-change-detective.git
 ```
 
 Requires [IBM Bob](https://www.ibm.com/products/bob) installed and available
@@ -92,7 +92,7 @@ tool's reasoning was validated against both:
   unseen UI consumers and correctly reasoning that one was unaffected because
   its error handling never inspects the response content at all.
 
-**Live results viewer:** `<your-netlify-url-here>`
+**Live results viewer:** `https://brilliant-clafoutis-f7075d.netlify.app/`
 Full details, real prompts, and real reasoning: `demo/ground_truth.md`
 
 ## Project structure
