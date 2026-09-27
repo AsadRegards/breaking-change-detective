@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Node
+node_modules/
+package-lock.json
+
+# Java
+target/
+*.class
+*.jar
+
+# Secrets — never commit real credentials
+.env
+.env.local
+*.key
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Generated output — regenerate, don't commit
+output/
+
+# External demo app clone — don't vendor a third-party repo;
+# document the clone command in README instead
+target-repo/
+
+# Logs
+*.log

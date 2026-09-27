@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Breaking-Change Detective</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #0d1117;
+    --surface:   #161b22;
+    --surface2:  #21262d;
+    --border:    #30363d;
+    --text:      #e6edf3;
+    --muted:     #8b949e;
+    --accent:    #58a6ff;
+
+    --red:       #f85149;
+    --red-bg:    #3d0f0a;
+    --orange:    #e3a63a;
+    --orange-bg: #3d2508;
+    --purple:    #bc8cff;
+    --purple-bg: #2a1a4a;
+    --blue:      #58a6ff;
+    --blue-bg:   #0c2d5e;
+    --green:     #56d364;
+    --green-bg:  #0a2a14;
+    --gray:      #8b949e;
+    --gray-bg:   #1c2128;
+
+    --diff-add:      #1a3a1a;
+    --diff-add-num:  #1e4b1e;
+    --diff-del:      #3a1a1a;
+    --diff-del-num:  #4b1e1e;
+    --diff-hunk:     #1a2a3a;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ─────────────────────────────────────────────────── */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 24px;
+  }
+  .header-inner { max-width: 900px; margin: 0 auto; }
+  header h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header h1 .icon { font-size: 22px; }
+  header p {
+    color: var(--muted);
+    margin-top: 4px;
+    font-size: 13px;
+  }
+
+  /* ── MAIN LAYOUT ─────────────────────────────────────────────── */
+  main { max-width: 900px; margin: 0 auto; padding: 28px 24px 48px; }
+
+  /* ── TABS ───────────────────────────────────────────────────── */
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0;
+  }
+  .tab-btn {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 8px 16px;
+    margin-bottom: -1px;
+    transition: color .15s, border-color .15s;
+    font-family: inherit;
+  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  .tab-badge {
+    display: inline-block;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 11px;
+    padding: 1px 7px;
+    margin-left: 6px;
+    color: var(--muted);
+  }
+  .tab-btn.active .tab-badge { color: var(--text); }
+
+  /* ── SECTION HEADINGS ────────────────────────────────────────── */
+  .section-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--muted);
+    margin: 28px 0 10px;
+  }
+
+  /* ── PIPELINE META ───────────────────────────────────────────── */
+  .meta-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .meta-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 14px;
+  }
+  .meta-card .meta-label { font-size: 11px; color: var(--muted); }
+  .meta-card .meta-value { font-size: 18px; font-weight: 600; color: var(--text); }
+
+  /* ── CONTRACT DELTA ─────────────────────────────────────────── */
+  .delta-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--orange);
+    border-radius: 6px;
+    padding: 14px 16px;
+  }
+  .delta-endpoint {
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-size: 13px;
+    color: var(--accent);
+    margin-bottom: 6px;
+  }
+  .delta-summary { color: var(--text); font-size: 13px; line-height: 1.7; }
+
+  /* ── DIFF ────────────────────────────────────────────────────── */
+  .diff-wrap {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .diff-file-header {
+    background: var(--surface2);
+    border-bottom: 1px solid var(--border);
+    padding: 7px 14px;
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .diff-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-size: 12px;
+    overflow-x: auto;
+    display: block;
+  }
+  .diff-table td { padding: 1px 0; white-space: pre; }
+  .diff-table .ln {
+    min-width: 36px;
+    text-align: right;
+    padding-right: 10px;
+    padding-left: 10px;
+    color: var(--muted);
+    user-select: none;
+    border-right: 1px solid var(--border);
+  }
+  .diff-table .code { padding-left: 12px; padding-right: 16px; }
+  .diff-table tr.add td { background: var(--diff-add); }
+  .diff-table tr.add td.ln { background: var(--diff-add-num); color: var(--green); }
+  .diff-table tr.del td { background: var(--diff-del); }
+  .diff-table tr.del td.ln { background: var(--diff-del-num); color: var(--red); }
+  .diff-table tr.hunk td { background: var(--diff-hunk); color: var(--muted); font-style: italic; }
+
+  /* ── CONSUMER CARDS ─────────────────────────────────────────── */
+  .consumer-grid { display: flex; flex-direction: column; gap: 10px; }
+
+  .consumer-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    border-left-width: 3px;
+  }
+  .consumer-card.verdict-BREAKS          { border-left-color: var(--red); }
+  .consumer-card.verdict-BREAKS_SILENTLY { border-left-color: var(--orange); }
+  .consumer-card.verdict-LATENT          { border-left-color: var(--purple); }
+  .consumer-card.verdict-INVESTIGATE     { border-left-color: var(--blue); }
+  .consumer-card.verdict-UNAFFECTED      { border-left-color: var(--gray); }
+
+  .card-header { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+  .card-consumer {
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-size: 12px;
+    color: var(--text);
+    flex: 1;
+    min-width: 0;
+    word-break: break-all;
+  }
+  .card-badges { display: flex; gap: 6px; flex-shrink: 0; flex-wrap: wrap; align-items: center; }
+
+  .badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: .03em;
+    white-space: nowrap;
+  }
+  .badge-BREAKS          { background: var(--red-bg);    color: var(--red);    border: 1px solid var(--red); }
+  .badge-BREAKS_SILENTLY { background: var(--orange-bg); color: var(--orange); border: 1px solid var(--orange); }
+  .badge-LATENT          { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple); }
+  .badge-INVESTIGATE     { background: var(--blue-bg);   color: var(--blue);   border: 1px solid var(--blue); }
+  .badge-UNAFFECTED      { background: var(--gray-bg);   color: var(--gray);   border: 1px solid var(--gray); }
+
+  .badge-cov { background: var(--surface2); color: var(--muted); border: 1px solid var(--border); font-weight: 500; }
+  .badge-cov.covered { color: var(--green); }
+  .badge-cov.uncovered { color: var(--muted); }
+
+  .card-location {
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 5px;
+  }
+
+  .card-reasoning {
+    margin-top: 10px;
+    font-size: 13px;
+    color: #c9d1d9;
+    line-height: 1.65;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+  }
+
+  .note-tag {
+    display: inline-block;
+    font-size: 11px;
+    background: var(--purple-bg);
+    color: var(--purple);
+    border: 1px solid var(--purple);
+    border-radius: 4px;
+    padding: 1px 7px;
+    margin-top: 6px;
+  }
+
+  /* ── SUMMARY BAR ─────────────────────────────────────────────── */
+  .summary-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+  }
+  .summary-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+  }
+  .summary-pill .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-BREAKS          { background: var(--red); }
+  .dot-BREAKS_SILENTLY { background: var(--orange); }
+  .dot-LATENT          { background: var(--purple); }
+  .dot-INVESTIGATE     { background: var(--blue); }
+  .dot-UNAFFECTED      { background: var(--gray); }
+
+  /* ── FOOTER ─────────────────────────────────────────────────── */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 20px 24px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  footer p + p { margin-top: 4px; }
+
+  /* ── RESPONSIVE ─────────────────────────────────────────────── */
+  @media (max-width: 600px) {
+    main { padding: 18px 14px 40px; }
+    .meta-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+  <p style="text-align:center; padding: 1%;">
+    <a href="REPO_URL_HERE" style="color:#4da6ff; text-decoration:none;">
+        <img src="https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png"
+             alt="GitHub"
+             width="18"
+             style="vertical-align:middle; margin-right:5px;">
+        View on GitHub →
+    </a>
+</p>
+<header>
+  <div class="header-inner">
+    <h1><span class="icon">🔍</span> Breaking-Change Detective</h1>
+    <p>Static analysis pipeline that diffs a changed API contract, discovers every consumer in the codebase, and produces a verdict — BREAKS / BREAKS_SILENTLY / LATENT / INVESTIGATE / UNAFFECTED — for each one via parallel LLM subagent reasoning.</p>
+  </div>
+</header>
+
+<main>
+  <div class="tabs" id="tabs">
+    <button class="tab-btn active" data-case="create_hold">
+      create_hold <span class="tab-badge" id="badge-create_hold"></span>
+    </button>
+    <button class="tab-btn" data-case="release_hold">
+      release_hold <span class="tab-badge" id="badge-release_hold"></span>
+    </button>
+  </div>
+
+  <div id="panel"></div>
+</main>
+
+<footer>
+  <p>Architecture: deterministic diff/consumer discovery in Python, verdict reasoning via Bob's native parallel subagent calls.</p>
+  <p>This page shows two validated runs. Live analysis runs via Bob in an IDE session.</p>
+</footer>
+
+<script>
+// ─── Embedded data ────────────────────────────────────────────────────────────
+
+const CASES = {
+  create_hold: {
+    label: "create_hold",
+    diff: `diff --git a/booking_system_backend/server.py b/booking_system_backend/server.py
+index cbbb300..7e88407 100644
+--- a/booking_system_backend/server.py
++++ b/booking_system_backend/server.py
+@@ -272,17 +272,15 @@ async def get_quote(quote_id: str):
+ 
+ @app.post("/quotes/{quote_id}/holds", tags=["Holds"])
+ async def create_hold(quote_id: str):
+-    """Proxy endpoint to create a hold from a quote in the Java hold service."""
+     async with httpx.AsyncClient() as client:
+         try:
+-            response = await client.post(
+-                f"{JAVA_SERVICE_URL}/api/v1/quotes/{quote_id}/holds",
+-                timeout=30.0
+-            )
++            response = await client.post(f"{JAVA_SERVICE_URL}/api/v1/quotes/{quote_id}/holds", timeout=30.0)
+             response.raise_for_status()
+             return response.json()
++        except httpx.HTTPStatusError as e:
++            raise HTTPException(status_code=e.response.status_code, detail=str(e))
+         except httpx.HTTPError as e:
+-            return {"error": f"Failed to create hold: {e!s}"}
++            raise HTTPException(status_code=502, detail=f"Failed to create hold: {e}")
+ 
+ 
+ @app.get("/holds/{hold_id}", tags=["Holds"])`,
+    contract_delta: {
+      file: "booking_system_backend/server.py",
+      function: "create_hold",
+      endpoint: "POST /quotes/{quote_id}/holds",
+      summary: "Error path changed: previously returned HTTP 200 with body key 'error'; now raises HTTPException with body key 'detail' and a real status code. Added error handling: except httpx.HTTPStatusError. Response shape on error: was {'{\"error\": \"...\"}'}, now {}."
+    },
+    pipeline: {
+      diff: "main..breaking-change-demo",
+      repo: "target-repo/galaxium-travels",
+      stage1_changed_functions: 1,
+      stage2_raw_candidates: 120,
+      stage2_after_prefilter: 0,
+      stage3_logical_consumer_units: 8,
+      stage3_parallel_subagent_calls: 5,
+      stage3_results_returned: 8
+    },
+    findings: [
+      {
+        consumer: "e2e/test_holds.py::test_hold_on_unknown_quote_returns_error",
+        file: "e2e/test_holds.py",
+        line: 87,
+        verdict: "BREAKS",
+        coverage: "covered",
+        in_ground_truth: true,
+        reasoning: "The test asserts '\"error\" in body', but after the contract change the error response body uses the key 'detail' instead of 'error', so that assertion will fail. The failure is loud and will surface immediately in CI."
+      },
+      {
+        consumer: "booking_system_frontend/src/services/api.ts::createHold+assertNotProxyError",
+        file: "booking_system_frontend/src/services/api.ts",
+        line: 180,
+        verdict: "BREAKS_SILENTLY",
+        coverage: "uncovered",
+        in_ground_truth: true,
+        reasoning: "Axios rejects non-2xx before assertNotProxyError is reached, and the interceptor re-rejects with a plain {detail:'...'} object. The catch site uses a hardcoded toast string so no user-visible break today, but the guard is dead code and any future code reading err.message silently gets undefined. No frontend tests exist."
+      },
+      {
+        consumer: "e2e/helpers.py::create_hold",
+        file: "e2e/helpers.py",
+        line: 62,
+        verdict: "LATENT",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        note: "Not in original ground truth — surfaced independently by clean subagent reasoning.",
+        reasoning: "Under the old contract raise_for_status() was a no-op (always 200) so the assert 'holdId' in hold line was the real guard. Under the new contract raise_for_status() fires first on any error, making that assert dead code on the error path. No test ever calls this helper with an invalid quote_id, so the path change is never exercised."
+      },
+      {
+        consumer: "booking_system_backend/server.py::FastApiMCP(app) — auto-wrapped create_hold tool",
+        file: "booking_system_backend/server.py",
+        line: 334,
+        verdict: "INVESTIGATE",
+        coverage: "uncovered",
+        in_ground_truth: true,
+        reasoning: "fastapi-mcp 0.4.0 auto-wraps every FastAPI route as an MCP tool. Whether a non-2xx status is surfaced as an MCP tool error (isError:true) or a successful result with error body depends on fastapi-mcp internals. No MCP-layer tests exist."
+      },
+      {
+        consumer: "e2e/test_holds.py::happy-path tests",
+        file: "e2e/test_holds.py",
+        line: null,
+        verdict: "UNAFFECTED",
+        coverage: "covered",
+        in_ground_truth: false,
+        reasoning: "These tests only exercise the success path on valid quotes; HTTPException is never triggered."
+      },
+      {
+        consumer: "booking_system_frontend/src/services/api.ts::getHold+confirmHold+releaseHold",
+        file: "booking_system_frontend/src/services/api.ts",
+        line: null,
+        verdict: "UNAFFECTED",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        reasoning: "These functions call separate endpoints whose Python handlers were not changed and still return HTTP 200 + {\"error\":...} on failure, so assertNotProxyError continues to work as before."
+      },
+      {
+        consumer: "booking_system_frontend/src/utils/holdStorage.ts",
+        file: "booking_system_frontend/src/utils/holdStorage.ts",
+        line: null,
+        verdict: "UNAFFECTED",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        reasoning: "A pure localStorage utility with no HTTP calls; matched only by incidental string overlap."
+      },
+      {
+        consumer: "booking_system_backend/server.py::other route handlers",
+        file: "booking_system_backend/server.py",
+        line: null,
+        verdict: "UNAFFECTED",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        reasoning: "Independent route handlers matched by URL substring only; not callers of create_hold."
+      }
+    ]
+  },
+
+  release_hold: {
+    label: "release_hold",
+    diff: `diff --git a/booking_system_backend/server.py b/booking_system_backend/server.py
+index 7e88407..11dccdd 100644
+--- a/booking_system_backend/server.py
++++ b/booking_system_backend/server.py
+@@ -315,17 +315,15 @@ async def confirm_hold(hold_id: str):
+ 
+ @app.post("/holds/{hold_id}/release", tags=["Holds"])
+ async def release_hold(hold_id: str):
+-    """Proxy endpoint to release a hold in the Java hold service."""
+     async with httpx.AsyncClient() as client:
+         try:
+-            response = await client.post(
+-                f"{JAVA_SERVICE_URL}/api/v1/holds/{hold_id}/release",
+-                timeout=30.0
+-            )
++            response = await client.post(f"{JAVA_SERVICE_URL}/api/v1/holds/{hold_id}/release", timeout=30.0)
+             response.raise_for_status()
+             return response.json()
++        except httpx.HTTPStatusError as e:
++            raise HTTPException(status_code=e.response.status_code, detail=str(e))
+         except httpx.HTTPError as e:
+-            return {"error": f"Failed to release hold: {e!s}"}
++            raise HTTPException(status_code=502, detail=f"Failed to release hold: {e}")
+ 
+ 
+ # ==================== MCP SERVER (for AI agents) ====================`,
+    contract_delta: {
+      file: "booking_system_backend/server.py",
+      function: "release_hold",
+      endpoint: "POST /holds/{hold_id}/release",
+      summary: "Error path changed: previously returned HTTP 200 with body key 'error'; now raises HTTPException with body key 'detail' and a real status code. Added error handling: except httpx.HTTPStatusError. Response shape on error: was {'{\"error\": \"...\"}'}, now {}."
+    },
+    pipeline: {
+      diff: "HEAD (working tree) — booking_system_backend/server.py",
+      repo: "target-repo/galaxium-travels",
+      stage1_changed_functions: 1,
+      stage2_raw_candidates: 59,
+      stage2_after_prefilter: 29,
+      stage3_logical_consumer_units: 8,
+      stage3_parallel_subagent_calls: 4,
+      stage3_results_returned: 8
+    },
+    findings: [
+      {
+        consumer: "booking_system_frontend/src/services/api.ts::releaseHold+assertNotProxyError",
+        file: "booking_system_frontend/src/services/api.ts",
+        line: 197,
+        verdict: "BREAKS_SILENTLY",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        reasoning: "Previously, upstream errors returned HTTP 200 with {error:'...'}, which assertNotProxyError caught and threw. Now the backend returns real 4xx/5xx so Axios rejects before assertNotProxyError is reached — the guard becomes dead code. The interceptor rejects with the raw {detail:'...'} body instead of {error:'...'}, so any caller inspecting the rejection shape for an 'error' key will silently miss it. No tests exist to catch this."
+      },
+      {
+        consumer: "booking_system_frontend/src/components/bookings/BookingModal.tsx::handleReleaseHold",
+        file: "booking_system_frontend/src/components/bookings/BookingModal.tsx",
+        line: 217,
+        verdict: "UNAFFECTED",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        reasoning: "handleReleaseHold uses a bare catch block that ignores the rejection value entirely and always shows a generic toast. Because it never inspects the error shape or HTTP status, the change from {error} throw to Axios rejection with {detail} body does not alter observable behaviour."
+      },
+      {
+        consumer: "booking_system_frontend/src/components/bookings/HoldCard.tsx::handleRelease",
+        file: "booking_system_frontend/src/components/bookings/HoldCard.tsx",
+        line: 79,
+        verdict: "UNAFFECTED",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        reasoning: "Structurally identical to handleReleaseHold — bare catch, generic toast, no inspection of error value or status code. Indifferent to rejection shape by construction."
+      },
+      {
+        consumer: "e2e/test_holds.py::test_release_does_not_consume_seat",
+        file: "e2e/test_holds.py",
+        line: 55,
+        verdict: "UNAFFECTED",
+        coverage: "covered",
+        in_ground_truth: false,
+        reasoning: "Uses a valid hold ID on the success path. The contract change only affects the error branch (upstream HTTP errors), which this test never exercises. On a valid hold the endpoint still returns 200 with RELEASED status."
+      },
+      {
+        consumer: "booking_system_backend/server.py::FastApiMCP(app) — auto-wrapped release_hold tool",
+        file: "booking_system_backend/server.py",
+        line: 332,
+        verdict: "INVESTIGATE",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        reasoning: "FastApiMCP auto-wraps the route as an MCP tool. Previously a failed release always returned HTTP 200 with error body, so MCP clients received a 'success' tool result. After the change, upstream errors raise HTTPException with real 4xx/5xx; whether fastapi-mcp 0.4.0 surfaces this as a tool error (isError:true) or as an unexpected non-200 response is unknown without inspecting fastapi-mcp source. No MCP-layer tests exist."
+      },
+      {
+        consumer: "e2e/test_holds.py::tests that do not call release",
+        file: "e2e/test_holds.py",
+        line: null,
+        verdict: "UNAFFECTED",
+        coverage: "covered",
+        in_ground_truth: false,
+        reasoning: "These tests never invoke the release endpoint."
+      },
+      {
+        consumer: "booking_system_backend/server.py::other route handlers",
+        file: "booking_system_backend/server.py",
+        line: null,
+        verdict: "UNAFFECTED",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        reasoning: "Independent handlers that do not call or delegate to release_hold."
+      },
+      {
+        consumer: "booking_system_frontend/src/services/api.ts::getHold+confirmHold",
+        file: "booking_system_frontend/src/services/api.ts",
+        line: null,
+        verdict: "UNAFFECTED",
+        coverage: "uncovered",
+        in_ground_truth: false,
+        reasoning: "Target different, unchanged endpoints. Not affected."
+      }
+    ]
+  }
+};
+
+// ─── Verdict display config ──────────────────────────────────────────────────
+
+const VERDICT_ORDER = ["BREAKS", "BREAKS_SILENTLY", "LATENT", "INVESTIGATE", "UNAFFECTED"];
+const VERDICT_LABEL = {
+  BREAKS: "BREAKS",
+  BREAKS_SILENTLY: "BREAKS SILENTLY",
+  LATENT: "LATENT",
+  INVESTIGATE: "INVESTIGATE",
+  UNAFFECTED: "UNAFFECTED"
+};
+
+// ─── Diff renderer ───────────────────────────────────────────────────────────
+
+function renderDiff(diffText) {
+  const lines = diffText.split('\n');
+  let html = '<div class="diff-wrap">';
+  let filename = '';
+
+  // Extract filename from diff header
+  for (const l of lines) {
+    if (l.startsWith('+++ b/')) { filename = l.slice(6); break; }
+    if (l.startsWith('+++ '))   { filename = l.slice(4); break; }
+  }
+
+  html += `<div class="diff-file-header">${esc(filename || 'diff')}</div>`;
+  html += '<table class="diff-table"><tbody>';
+
+  let leftNum = 0, rightNum = 0;
+  let inHeader = true; // skip the first few meta lines before first hunk
+
+  for (const line of lines) {
+    // Skip pure meta lines (diff/index/---/+++) before first hunk
+    if (inHeader) {
+      if (line.startsWith('@@')) inHeader = false;
+      else continue;
+    }
+
+    if (line.startsWith('@@')) {
+      // Parse hunk header for line numbers
+      const m = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)/);
+      if (m) { leftNum = parseInt(m[1], 10) - 1; rightNum = parseInt(m[2], 10) - 1; }
+      html += `<tr class="hunk"><td class="ln" colspan="2"></td><td class="code">${esc(line)}</td></tr>`;
+    } else if (line.startsWith('-')) {
+      leftNum++;
+      html += `<tr class="del"><td class="ln">${leftNum}</td><td class="ln"></td><td class="code">${esc(line)}</td></tr>`;
+    } else if (line.startsWith('+')) {
+      rightNum++;
+      html += `<tr class="add"><td class="ln"></td><td class="ln">${rightNum}</td><td class="code">${esc(line)}</td></tr>`;
+    } else {
+      leftNum++; rightNum++;
+      html += `<tr><td class="ln">${leftNum}</td><td class="ln">${rightNum}</td><td class="code">${esc(line)}</td></tr>`;
+    }
+  }
+
+  html += '</tbody></table></div>';
+  return html;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function countVerdicts(findings) {
+  const counts = {};
+  for (const f of findings) counts[f.verdict] = (counts[f.verdict] || 0) + 1;
+  return counts;
+}
+
+// ─── Panel renderer ──────────────────────────────────────────────────────────
+
+function renderPanel(caseKey) {
+  const data = CASES[caseKey];
+  const counts = countVerdicts(data.findings);
+  const p = data.pipeline;
+
+  let html = '';
+
+  // ── Pipeline meta ──
+  html += '<p class="section-title">Pipeline Run</p>';
+  html += '<div class="meta-grid">';
+  html += metaCard('Changed fns', p.stage1_changed_functions);
+  html += metaCard('Raw candidates', p.stage2_raw_candidates);
+  html += metaCard('Consumer units', p.stage3_logical_consumer_units);
+  html += metaCard('Subagent calls', p.stage3_parallel_subagent_calls);
+  html += metaCard('Results back', p.stage3_results_returned);
+  html += '</div>';
+  html += `<p style="font-size:11px;color:var(--muted);margin-top:6px;margin-bottom:0">Repo: ${esc(p.repo)} &nbsp;·&nbsp; Diff: ${esc(p.diff)}</p>`;
+
+  // ── Contract delta ──
+  html += '<p class="section-title">Contract Delta</p>';
+  html += '<div class="delta-box">';
+  html += `<div class="delta-endpoint">${esc(data.contract_delta.endpoint)} &nbsp;·&nbsp; ${esc(data.contract_delta.file)}::${esc(data.contract_delta.function)}</div>`;
+  html += `<div class="delta-summary">${esc(data.contract_delta.summary)}</div>`;
+  html += '</div>';
+
+  // ── Seeded diff ──
+  html += '<p class="section-title">Seeded Diff</p>';
+  html += renderDiff(data.diff);
+
+  // ── Summary pills ──
+  html += '<p class="section-title" style="margin-top:28px">Consumer Verdicts</p>';
+  html += '<div class="summary-row">';
+  for (const v of VERDICT_ORDER) {
+    if (!counts[v]) continue;
+    html += `<div class="summary-pill"><span class="dot dot-${v}"></span>${VERDICT_LABEL[v]} &nbsp;<strong>${counts[v]}</strong></div>`;
+  }
+  html += '</div>';
+
+  // ── Consumer cards (sorted by verdict severity) ──
+  html += '<div class="consumer-grid">';
+  const sorted = [...data.findings].sort(
+    (a, b) => VERDICT_ORDER.indexOf(a.verdict) - VERDICT_ORDER.indexOf(b.verdict)
+  );
+  for (const f of sorted) {
+    html += renderCard(f);
+  }
+  html += '</div>';
+
+  return html;
+}
+
+function metaCard(label, value) {
+  return `<div class="meta-card"><div class="meta-label">${esc(label)}</div><div class="meta-value">${esc(String(value))}</div></div>`;
+}
+
+function renderCard(f) {
+  const loc = f.line ? `${esc(f.file)}:${f.line}` : esc(f.file);
+  const covClass = f.coverage === 'covered' ? 'covered' : 'uncovered';
+  const covLabel = f.coverage === 'covered' ? '✓ covered' : '○ uncovered';
+
+  let html = `<div class="consumer-card verdict-${f.verdict}">`;
+  html += '<div class="card-header">';
+  html += `<div class="card-consumer">${esc(f.consumer)}</div>`;
+  html += '<div class="card-badges">';
+  html += `<span class="badge badge-${f.verdict}">${VERDICT_LABEL[f.verdict]}</span>`;
+  html += `<span class="badge badge-cov ${covClass}">${covLabel}</span>`;
+  html += '</div>';
+  html += '</div>';
+  html += `<div class="card-location">${loc}</div>`;
+  html += `<div class="card-reasoning">${esc(f.reasoning)}</div>`;
+  if (f.note) {
+    html += `<div class="note-tag">★ ${esc(f.note)}</div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+// ─── Tab badges ──────────────────────────────────────────────────────────────
+
+function setBadges() {
+  for (const [key, data] of Object.entries(CASES)) {
+    const counts = countVerdicts(data.findings);
+    const serious = (counts['BREAKS'] || 0) + (counts['BREAKS_SILENTLY'] || 0);
+    const el = document.getElementById('badge-' + key);
+    if (el) el.textContent = serious > 0 ? `${serious} issue${serious > 1 ? 's' : ''}` : 'clean';
+  }
+}
+
+// ─── Tab switching ───────────────────────────────────────────────────────────
+
+let activeCase = 'create_hold';
+
+function showCase(caseKey) {
+  activeCase = caseKey;
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.case === caseKey);
+  });
+  document.getElementById('panel').innerHTML = renderPanel(caseKey);
+}
+
+document.getElementById('tabs').addEventListener('click', e => {
+  const btn = e.target.closest('.tab-btn');
+  if (btn) showCase(btn.dataset.case);
+});
+
+// ─── Init ────────────────────────────────────────────────────────────────────
+
+setBadges();
+showCase('create_hold');
+</script>
+
+</body>
+</html>

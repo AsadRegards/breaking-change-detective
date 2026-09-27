@@ -1,0 +1,21 @@
+Modern systems are built from shared internal services consumed by multiple downstream callers, often across different languages. When shared code changes, CI typically catches only syntactic breaks—things that fail to compile or break existing tests. It rarely catches semantic breaks: code that still runs and passes tests but behaves differently for a caller that depended on the old contract. These changes can quietly ship and surface later as production incidents.
+
+Breaking-Change Detective takes a git diff to a shared internal function and asks not “does this compile?” but “which downstream consumers depend on the behavior that changed, and will they notice?”
+
+It works in two stages. First, deterministic scripts extract a structured contract delta from the diff—changes to status codes, response shape, error signaling, and similar behavior—and discover plausible consumers across the codebase, including tests, frontend clients, and auto-generated tool wrappers. Raw text matches are filtered down to real code call sites. Second, each discovered consumer is analyzed independently and in parallel by Bob’s agent reasoning. Bob reads the actual before/after contract alongside the consumer’s source and returns one of five verdicts:
+
+BREAKS — a test will fail.
+
+BREAKS_SILENTLY — behavior changes with no test to catch it.
+
+LATENT — a safety check is defeated but not currently exercised.
+
+INVESTIGATE — further analysis is needed.
+
+UNAFFECTED — the consumer does not depend on the changed behavior.
+
+We validated the approach against IBM’s Galaxium Travels demo app by seeding two realistic changes to its Python–Java proxy layer. The tool correctly separated a loud, CI-detected test failure from a genuinely silent break in an untested frontend. It also correctly reasoned about the auto-generated MCP tool layer used by AI agents and independently surfaced a fourth risk: a test helper whose own failure-detection assertion had quietly become dead code. That issue was not seeded; it emerged from reasoning about the same contract change from another angle.
+
+We then stress-tested genericity with a second breaking change in an unrelated endpoint, with no prior ground truth. The tool discovered two previously unseen UI consumers and correctly identified one as unaffected—not because it matched a pattern, but because its specific catch block never inspects the changed error content.
+
+The key distinction from a generic “find usages” tool is that Breaking-Change Detective reasons about whether a consumer’s own error-detection logic still fires under the new contract, rather than merely whether the code path remains reachable.
